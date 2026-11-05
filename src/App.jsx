@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Clock,
   Calendar,
   User,
   Play,
   Square,
-  Coffee,
   Palmtree,
   TrendingUp,
   TrendingDown,
@@ -13,199 +12,86 @@ import {
   ChevronRight,
   Plus,
   Trash2,
-  Edit3,
   Check,
-  X,
-  Download,
-  Upload,
-  ShieldAlert,
-  Lock,
-  Unlock,
-  AlertTriangle,
-  CheckCircle2
+  Coffee,
+  Edit3,
+  RotateCcw,
+  AlertCircle
 } from 'lucide-react';
 
-// --- HELPER FUNCTIONS ---
-const formatDateKey = (date) => {
-  const d = new Date(date);
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+const DAYS_OF_WEEK = [
+  { key: 'mon', label: 'Monday', short: 'Mon', jsDay: 1 },
+  { key: 'tue', label: 'Tuesday', short: 'Tue', jsDay: 2 },
+  { key: 'wed', label: 'Wednesday', short: 'Wed', jsDay: 3 },
+  { key: 'thu', label: 'Thursday', short: 'Thu', jsDay: 4 },
+  { key: 'fri', label: 'Friday', short: 'Fri', jsDay: 5 },
+  { key: 'sat', label: 'Saturday', short: 'Sat', jsDay: 6 },
+  { key: 'sun', label: 'Sunday', short: 'Sun', jsDay: 0 },
+];
+
+const DEFAULT_PROFILE = {
+  name: 'Alex',
+  weeklyHours: 37.5,
+  useCustomDailyHours: false,
+  workingDays: {
+    mon: true,
+    tue: true,
+    wed: true,
+    thu: true,
+    fri: true,
+    sat: false,
+    sun: false,
+  },
+  customDailyHours: {
+    mon: 7.5,
+    tue: 7.5,
+    wed: 7.5,
+    thu: 7.5,
+    fri: 7.5,
+    sat: 0,
+    sun: 0,
+  },
+  defaultBreakMins: 30,
+  startingBalanceHours: 0,
+  trackingStartDate: '',
+};
+
+const toDateKey = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
 
-const getMonday = (d) => {
-  const date = new Date(d);
-  const day = date.getDay();
-  const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-  date.setDate(diff);
-  date.setHours(0, 0, 0, 0);
-  return date;
+const parseDateKey = (dateKey) => {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
+
+const getMonday = (date) => {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  return new Date(d.setDate(diff));
 };
 
 const addDays = (date, days) => {
-  const result = new Date(date);
-  result.setDate(result.getDate() + days);
-  return result;
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  d.setDate(d.getDate() + days);
+  return d;
 };
 
-const formatHoursAndMinutes = (decimalHours, showSign = false) => {
-  const isNegative = decimalHours < 0;
+const formatTimeHHMM = (date) => {
+  const h = String(date.getHours()).padStart(2, '0');
+  const m = String(date.getMinutes()).padStart(2, '0');
+  return `${h}:${m}`;
+};
+
+const formatDurationHours = (decimalHours, showSign = false) => {
+  const isNegative = decimalHours < -0.005;
   const absHours = Math.abs(decimalHours);
-  let hours = Math.floor(absHours);
-  let minutes = Math.round((absHours - hours) * 60);
-  if (minutes === 60) {
-    hours += 1;
-    minutes = 0;
-  }
-  const sign = isNegative ? '-' : showSign && decimalHours > 0 ? '+' : '';
-  return `${sign}${hours}h ${String(minutes).padStart(2, '0')}m`;
-};
-
-const formatDurationClock = (ms) => {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const hrs = Math.floor(totalSeconds / 3600);
-  const mins = Math.floor((totalSeconds % 3600) / 60);
-  const secs = totalSeconds % 60;
-  return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-};
-
-const calculateShiftHours = (clockIn, clockOut, breakMinutes = 0) => {
-  if (!clockIn || !clockOut) return 0;
-  const [inH, inM] = clockIn.split(':').map(Number);
-  const [outH, outM] = clockOut.split(':').map(Number);
-  let startMins = inH * 60 + inM;
-  let endMins = outH * 60 + outM;
-  if (endMins < startMins) {
-    endMins += 24 * 60; // Support overnight shifts
-  }
-  const netMins = Math.max(0, endMins - startMins - (Number(breakMinutes) || 0));
-  return netMins / 60;
-};
-
-const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const FULL_DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const ORDERED_WEEK_INDICES = [1, 2, 3, 4, 5, 6, 0]; // Mon -> Sun
-
-const DEFAULT_PROFILE = {
-  name: 'My Work Profile',
-  weeklyHours: 37.5,
-  workDays: [1, 2, 3, 4, 5], // Mon-Fri
-  useCustomDailyHours: false,
-  customDailyHours: {
-    1: 7.5,
-    2: 7.5,
-    3: 7.5,
-    4: 7.5,
-    5: 7.5,
-    6: 0,
-    0: 0
-  },
-  defaultBreakMinutes: 30,
-  startingFlexiBalance: 0 // in decimal hours
-};
-
-export default function App() {
-  // --- STATE ---
-  const [activeTab, setActiveTab] = useState('dashboard');
-
-  const [profile, setProfile] = useState(() => {
-    try {
-      const saved = localStorage.getItem('workflex_profile_v1');
-      return saved ? { ...DEFAULT_PROFILE, ...JSON.parse(saved) } : DEFAULT_PROFILE;
-    } catch {
-      return DEFAULT_PROFILE;
-    }
-  });
-
-  const [logs, setLogs] = useState(() => {
-    try {
-      const saved = localStorage.getItem('workflex_logs_v1');
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
-
-  const [activeShift, setActiveShift] = useState(() => {
-    try {
-      const saved = localStorage.getItem('workflex_active_shift_v1');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
-
-  const [now, setNow] = useState(Date.now());
-  const [selectedWeekStart, setSelectedWeekStart] = useState(() => getMonday(new Date()));
-  const [editingDateKey, setEditingDateKey] = useState(null);
-  const [editModalData, setEditModalData] = useState(null);
-  const [toastMessage, setToastMessage] = useState(null);
-
-  // --- SAFETY LOCK STATES FOR DATA & BACKUP ---
-  const [isDataSectionUnlocked, setIsDataSectionUnlocked] = useState(false);
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [resetConfirmText, setResetConfirmText] = useState('');
-  const [pendingImportData, setPendingImportData] = useState(null);
-  const fileInputRef = useRef(null);
-
-  // --- PERSISTENCE ---
-  useEffect(() => {
-    localStorage.setItem('workflex_profile_v1', JSON.stringify(profile));
-  }, [profile]);
-
-  useEffect(() => {
-    localStorage.setItem('workflex_logs_v1', JSON.stringify(logs));
-  }, [logs]);
-
-  useEffect(() => {
-    if (activeShift) {
-      localStorage.setItem('workflex_active_shift_v1', JSON.stringify(activeShift));
-    } else {
-      localStorage.removeItem('workflex_active_shift_v1');
-    }
-  }, [activeShift]);
-
-  // Live timer tick
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Re-lock data controls whenever user leaves the Profile tab
-  useEffect(() => {
-    if (activeTab !== 'profile') {
-      setIsDataSectionUnlocked(false);
-      setShowResetConfirm(false);
-      setResetConfirmText('');
-      setPendingImportData(null);
-    }
-  }, [activeTab]);
-
-  const showToast = (msg) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
-  };
-
-  // --- CONTRACTED HOURS HELPERS ---
-  const getTargetHoursForDayIndex = (dayIndex) => {
-    if (profile.useCustomDailyHours) {
-      return Number(profile.customDailyHours?.[dayIndex]) || 0;
-    }
-    if (profile.workDays.includes(dayIndex)) {
-      const count = profile.workDays.length || 1;
-      return Number(profile.weeklyHours) / count;
-    }
-    return 0;
-  };
-
-  const getTargetHoursForDate = (dateStr) => {
-    const [y, m, d] = dateStr.split('-').map(Number);
-    const dateObj = new Date(y, m - 1, d);
-    return getTargetHoursForDayIndex(dateObj.getDay());
-  };
-
-  const getWorkedHoursForDayLog = (dateStr, dayLog) => {
-    if (!dayLog) return 0;
-    if (dayLog.isAnnualLeave) {
-      return dayLog.leaveHours !== undefined
+  const totalMins = Math.round(absHours * 60);
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  const sign = isNegative ? '-' : showSign && totalMins > 0 ? '+' : '';
+  if
