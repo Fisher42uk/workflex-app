@@ -12,7 +12,7 @@
   "dependencies": {
     "lucide-react": "latest",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1",
+    "react-dom": "^19.3.1"
     
   },
   "devDependencies": {
